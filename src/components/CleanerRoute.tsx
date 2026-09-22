@@ -14,13 +14,24 @@ export function RouteScreen() {
   const active = zones.find((z) => z.status === 'active')
   const completedCount = zones.filter((z) => z.status === 'completed').length
   const lockedCount = zones.filter((z) => z.status === 'locked').length
+  const addresses = [...new Set(zones.map((z) => z.address))]
+
+  const plural = (n: number, one: string, few: string, many: string) => {
+    const mod10 = n % 10
+    const mod100 = n % 100
+    if (mod10 === 1 && mod100 !== 11) return one
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few
+    return many
+  }
 
   return (
     <div className="h-full flex flex-col bg-white animate-fade-in">
       {/* Шапка клинера */}
       <header className="bg-white px-6 pt-12 pb-4 shadow-sm z-10 flex justify-between items-center shrink-0">
         <div>
-          <p className="text-sm text-slate-500 font-medium">Смена активна · {completedCount}/{zones.length} зон</p>
+          <p className="text-sm text-slate-500 font-medium">
+            Смена активна · {addresses.length} {plural(addresses.length, 'точка', 'точки', 'точек')} · {completedCount}/{zones.length} зон
+          </p>
           <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
             {cleaner.name}
             <span className="text-xs font-bold text-brand-600 bg-brand-50 px-2 py-0.5 rounded-full flex items-center gap-1">
@@ -38,6 +49,22 @@ export function RouteScreen() {
           <h3 className="text-2xl font-bold text-slate-800 mb-1">Карта маршрута</h3>
           <p className="text-slate-500 mb-6 text-sm">Следуйте строго по плану во избежание перекрестного загрязнения.</p>
 
+          {/* Адреса на сегодня: клинер за день может объехать несколько точек */}
+          <div className="flex flex-wrap gap-2 mb-6">
+            <span className="inline-flex items-center gap-1.5 bg-slate-900 text-white rounded-full px-3 py-1.5 text-xs font-extrabold uppercase tracking-wide shadow-sm">
+              <MapPin className="w-3.5 h-3.5" /> Сегодня · {addresses.length} {plural(addresses.length, 'точка', 'точки', 'точек')}
+            </span>
+            {addresses.map((address) => (
+              <span
+                key={address}
+                className="inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-600 rounded-full px-3 py-1.5 text-xs font-semibold"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-brand-500" />
+                {address}
+              </span>
+            ))}
+          </div>
+
           {/* Активная зона — большой цветной блок (Экран 1: Жесткий Маршрут) */}
           {active && (
             <button
@@ -52,7 +79,10 @@ export function RouteScreen() {
               </div>
               <p className="text-white/80 text-sm mt-6 font-medium">Сейчас нужно убрать</p>
               <h4 className="text-3xl font-bold mt-1 leading-tight">{active.name}</h4>
-              <p className="text-white/80 text-sm mt-2">{active.time}</p>
+              <p className="text-white/90 text-sm mt-2 flex items-center gap-1.5 font-medium">
+                <MapPin className="w-4 h-4 shrink-0" /> {active.address}
+              </p>
+              <p className="text-white/70 text-sm mt-1">{active.time}</p>
               <div className="mt-4 bg-white/20 backdrop-blur rounded-xl p-3 border border-white/30 flex items-center gap-2">
                 <span className="font-semibold text-sm">Приступить</span>
                 <ArrowRight className="w-4 h-4 ml-auto" />
@@ -102,6 +132,10 @@ export function RouteScreen() {
                         </div>
                         {isCompleted && <CheckCircle2 className="w-6 h-6 text-brand-500 shrink-0" />}
                       </div>
+
+                      <p className="flex items-center gap-1 text-xs text-slate-400 font-medium mb-3">
+                        <MapPin className="w-3 h-3 shrink-0" /> {zone.address}
+                      </p>
 
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-slate-400 font-medium">

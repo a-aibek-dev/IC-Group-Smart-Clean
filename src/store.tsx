@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { PhotoStatus, Toast, View, Zone } from './types'
-import { routeFactory, seedCleaner } from './data/mock'
+import type { PhotoStatus, TeamCleaner, Toast, View, Zone, ZoneType } from './types'
+import { planThemes, planZone, routeFactory, seedCleaner, seedTeam, zoneIconName, zoneTemplates } from './data/mock'
 
 interface AppState {
   view: View
@@ -24,6 +24,22 @@ interface AppState {
   logout: () => void
   showToast: (text: string, duration?: number) => void
   resetRoute: () => void
+  /** Команда клинеров для CRM (редактируемые планы) */
+  team: TeamCleaner[]
+  moveCleanerZone: (cleanerId: string, from: number, to: number) => void
+  toggleTaskAssigned: (cleanerId: string, zoneId: string, taskId: string) => void
+  addCleanerTask: (cleanerId: string, zoneId: string, title: string) => void
+  removeCleanerTask: (cleanerId: string, zoneId: string, taskId: string) => void
+  setCleanerZoneType: (cleanerId: string, zoneId: string, type: ZoneType) => void
+  setCleanerZoneField: (
+    cleanerId: string,
+    zoneId: string,
+    field: 'time' | 'address',
+    value: string,
+  ) => void
+  addCleanerZone: (cleanerId: string, type: ZoneType) => void
+  removeCleanerZone: (cleanerId: string, zoneId: string) => void
+  resetCleanerPlan: (cleanerId: string) => void
 }
 
 const Ctx = createContext<AppState | null>(null)
@@ -58,6 +74,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [photoStatus, setPhotoStatus] = useState<PhotoStatus>('idle')
   const [toasts, setToasts] = useState<Toast[]>([])
   const toastId = useRef(0)
+
+  /** Команда клинеров для CRM: планы редактирует менеджер */
+  const [team, setTeam] = useState<TeamCleaner[]>(seedTeam)
+  const seedTeamRef = useRef<TeamCleaner[]>(seedTeam)
+  // Синхронная читаемая ссылка на команду: апдейтеры setState React
+  // выполняются НЕ сразу, поэтому для зеркалирования плана в live-маршрут
+  // читаем состояние отсюда.
+  const teamRef = useRef<TeamCleaner[]>(seedTeam)
+  teamRef.current = team
 
   // Live-синхронизация: канал + refs (стабильные ссылки между рендерами)
   const channelRef = useRef<BroadcastChannel | null>(null)
@@ -128,6 +153,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     return () => channel.close()
   }, [showToast, channelRef, selfIdRef, zonesRef])
+
+  // Обратная синхронизация live → план CRM: прогресс клинера на телефоне
+  // (завершенные зоны, отмеченные задачи) должен попадать в план Айгуль (t1),
+  // которым пользуется редактор менеджера. Иначе редактор держит «слепок до
+  // смены» и любая перестановка зон «откатывала» бы выполненное (актив
+  // возвращался на первый невыполненный шаг устаревшего плана).
+  useEffect(() => {
+    const t1 = teamRef.current.find((c) => c.id === 't1')
+    if (!t1) return
+    const planJson = JSON.stringify(t1.plan)
+    const zonesJson = JSON.stringify(zones)
+    if (planJson === zonesJson) return
+    setTeam((prev) => prev.map((c) => (c.id === 't1' ? { ...c, plan: zones } : c)))
+  }, [zones])
 
   const login = useCallback((role: 'cleaner' | 'manager') => {
     // НЕ сбрасываем setZones(routeFactory()) — маршрут принадлежит live-каналу:
@@ -238,6 +277,156 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [showToast],
   )
 
+  /* ---------- CRM: редактирование плана конкретного клинера ---------- */
+
+  // Правки плана Айгуль (t1) зеркалятся в live-маршрут: приложение клинера
+  // на телефоне сразу получает новый порядок/чек-лист через BroadcastChannel.
+  const mirrorToLive = useCallback(
+    (cleanerId: string, plan: Zone[]) => {
+      if (cleanerId === 't1') setZones(withActiveFirst(plan))
+    },
+    [setZones],
+  )
+
+  // Общий шаг: вычислить новый план синхронно (из teamRef), сохранить в team
+  // и — для Айгуль — продублировать в live-маршрут.
+  const updateCleanerPlan = useCallback(
+    (cleanerId: string, mutate: (plan: Zone[]) => Zone[]) => {
+      const current = teamRef.current.find((c) => c.id === cleanerId)
+      if (!current) return
+      const plan = mutate(current.plan)
+      setTeam((prev) => prev.map((c) => (c.id === cleanerId ? { ...c, plan } : c)))
+      mirrorToLive(cleanerId, plan)
+    },
+    [mirrorToLive],
+  )
+
+  const moveCleanerZone = useCallback(
+    (cleanerId: string, from: number, to: number) => {
+      if (from === to) return
+      updateCleanerPlan(cleanerId, (plan) => {
+        const next = [...plan]
+        ;[next[from], next[to]] = [next[to], next[from]]
+        return withActiveFirst(next)
+      })
+      showToast('Маршрут обновлен: порядок зон изменен.')
+    },
+    [updateCleanerPlan, showToast],
+  )
+
+  const toggleTaskAssigned = useCallback(
+    (cleanerId: string, zoneId: string, taskId: string) => {
+      updateCleanerPlan(cleanerId, (plan) =>
+        plan.map((z) =>
+          z.id === zoneId
+            ? {
+                ...z,
+                tasks: z.tasks.map((t) =>
+                  t.id === taskId && !t.hidden ? { ...t, assigned: !(t.assigned ?? true) } : t,
+                ),
+              }
+            : z,
+        ),
+      )
+    },
+    [updateCleanerPlan],
+  )
+
+  const addCleanerTask = useCallback(
+    (cleanerId: string, zoneId: string, title: string) => {
+      const text = title.trim()
+      if (!text) return
+      updateCleanerPlan(cleanerId, (plan) =>
+        plan.map((z) =>
+          z.id === zoneId
+            ? {
+                ...z,
+                tasks: [
+                  ...z.tasks,
+                  {
+                    id: `${zoneId}-task-${Date.now().toString(36)}`,
+                    title: text,
+                    hidden: false,
+                    assigned: true,
+                    done: false,
+                  },
+                ],
+              }
+            : z,
+        ),
+      )
+    },
+    [updateCleanerPlan],
+  )
+
+  const removeCleanerTask = useCallback(
+    (cleanerId: string, zoneId: string, taskId: string) => {
+      updateCleanerPlan(cleanerId, (plan) =>
+        plan.map((z) =>
+          z.id === zoneId ? { ...z, tasks: z.tasks.filter((t) => !(t.id === taskId && !t.hidden)) } : z,
+        ),
+      )
+    },
+    [updateCleanerPlan],
+  )
+
+  const setCleanerZoneType = useCallback(
+    (cleanerId: string, zoneId: string, type: ZoneType) => {
+      updateCleanerPlan(cleanerId, (plan) =>
+        plan.map((z) =>
+          z.id === zoneId ? { ...z, type, ...zoneTemplates[type], icon: zoneIconName(type) } : z,
+        ),
+      )
+      showToast('Стандарт зоны обновлен: регламент, цвет и pH подтянуты из шаблона.')
+    },
+    [updateCleanerPlan, showToast],
+  )
+
+  const setCleanerZoneField = useCallback(
+    (cleanerId: string, zoneId: string, field: 'time' | 'address', value: string) => {
+      updateCleanerPlan(cleanerId, (plan) =>
+        plan.map((z) => (z.id === zoneId ? { ...z, [field]: value } : z)),
+      )
+    },
+    [updateCleanerPlan],
+  )
+
+  const addCleanerZone = useCallback(
+    (cleanerId: string, type: ZoneType) => {
+      const current = teamRef.current.find((c) => c.id === cleanerId)
+      if (!current) return
+      const zone = planZone(
+        `z${cleanerId}-${Date.now().toString(36)}`,
+        type,
+        planThemes[type].time,
+        current.points[0] ?? current.address,
+        'locked',
+      )
+      updateCleanerPlan(cleanerId, (plan) => [...plan, zone])
+      showToast(`Зона «${planThemes[type].name}» добавлена в план.`)
+    },
+    [updateCleanerPlan, showToast],
+  )
+
+  const removeCleanerZone = useCallback(
+    (cleanerId: string, zoneId: string) => {
+      updateCleanerPlan(cleanerId, (plan) => plan.filter((z) => z.id !== zoneId))
+      showToast('Зона удалена из плана.')
+    },
+    [updateCleanerPlan, showToast],
+  )
+
+  const resetCleanerPlan = useCallback(
+    (cleanerId: string) => {
+      const seed = seedTeamRef.current.find((c) => c.id === cleanerId)
+      if (!seed) return
+      setTeam((prev) => prev.map((c) => (c.id === cleanerId ? seed : c)))
+      mirrorToLive(cleanerId, seed.plan)
+      showToast('План клинера сброшен к стандартному шаблону.')
+    },
+    [mirrorToLive, showToast],
+  )
+
   const value = useMemo<AppState>(
     () => ({
       view,
@@ -260,8 +449,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       logout,
       showToast,
       resetRoute,
+      team,
+      moveCleanerZone,
+      toggleTaskAssigned,
+      addCleanerTask,
+      removeCleanerTask,
+      setCleanerZoneType,
+      setCleanerZoneField,
+      addCleanerZone,
+      removeCleanerZone,
+      resetCleanerPlan,
     }),
-    [view, user, zones, setZones, activeZoneId, photoStatus, toasts, openZone, backToRoute, toggleTask, simulatePhoto, finishZone, reorderZones, login, startDemo, logout, showToast, resetRoute],
+    [view, user, zones, setZones, activeZoneId, photoStatus, toasts, openZone, backToRoute, toggleTask, simulatePhoto, finishZone, reorderZones, login, startDemo, logout, showToast, resetRoute, team, moveCleanerZone, toggleTaskAssigned, addCleanerTask, removeCleanerTask, setCleanerZoneType, setCleanerZoneField, addCleanerZone, removeCleanerZone, resetCleanerPlan],
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

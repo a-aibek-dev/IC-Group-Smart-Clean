@@ -8,17 +8,19 @@ import {
   ScanLine,
   CheckCircle,
   ClipboardCheck,
+  MapPin,
 } from 'lucide-react'
 import { useApp } from '../store'
 import type { Zone } from '../types'
+import { RegulationCard } from './RegulationCard'
 
 export function ZoneScreen() {
   const { zones, activeZoneId, photoStatus, backToRoute, toggleTask, simulatePhoto, finishZone } = useApp()
 
   const zone = zones.find((z: Zone) => z.id === activeZoneId)
-  const baseTasks = useMemo(() => zone?.tasks.filter((t) => !t.hidden) ?? [], [zone])
-  const hiddenTasks = useMemo(() => zone?.tasks.filter((t) => t.hidden) ?? [], [zone])
-  const allDone = zone?.tasks.every((t) => t.done) ?? false
+  const baseTasks = useMemo(() => zone?.tasks.filter((t) => !t.hidden && (t.assigned ?? true)) ?? [], [zone])
+  const hiddenTasks = useMemo(() => zone?.tasks.filter((t) => t.hidden && (t.assigned ?? true)) ?? [], [zone])
+  const allDone = zone?.tasks.filter((t) => t.assigned ?? true).every((t) => t.done) ?? false
   const hiddenDone = hiddenTasks.filter((t) => t.done).length
 
   if (!zone) return null
@@ -31,7 +33,10 @@ export function ZoneScreen() {
           onClick={backToRoute}
           className="w-5 h-5 mb-6 text-white/80 hover:text-white cursor-pointer"
         />
-        <h2 className="text-3xl font-bold text-white mb-4">{zone.name}</h2>
+        <h2 className="text-3xl font-bold text-white mb-1">{zone.name}</h2>
+        <p className="text-white/90 text-sm font-medium mb-4 flex items-center gap-1.5">
+          <MapPin className="w-4 h-4 shrink-0" /> {zone.address}
+        </p>
 
         {/* Подсказка pH + инвентарь (Защита от перекрестного загрязнения) */}
         <div className="bg-white/20 backdrop-blur-md rounded-xl p-3 border border-white/30 space-y-2">
@@ -53,6 +58,14 @@ export function ZoneScreen() {
       <div className="flex-1 min-h-0 overflow-y-auto relative z-10 -mt-6">
         {/* pb-24: запас под нижний тост, чтобы он не накрывал «Фото-итог» и «Завершить» */}
         <div className="px-6 pb-24">
+          {/* ЭКРАН 2: Уборка и Регламент — SOP зоны (Как сделать, Стандарты, Средства) */}
+          <RegulationCard
+            regulation={zone.regulation}
+            colorClass={zone.colorClass}
+            colorText={zone.text}
+            lightColor={zone.lightColor}
+          />
+
           <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden">
             <div className="p-4 bg-slate-50 border-b border-slate-100">
               <h3 className="flex items-center gap-2">
