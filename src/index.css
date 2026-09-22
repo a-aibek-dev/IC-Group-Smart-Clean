@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+#root {
+  height: 100vh; /* фолбэк для старых браузеров без dvh */
+  height: 100dvh; /* динамическая высота: корректно на телефонах со скрытой адресной строкой */
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: #ffffff; /* белый — чтобы не было серых полей на телефоне */
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Тосты и появление кнопки «Завершить»: мягкий подъём снизу */
+@keyframes mobile-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-slide-up {
+  animation: mobile-slide-up 0.22s ease-out;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+
+/* Кнопки: запрет «выделения по долгому тапу» на iOS.
+   ВАЖНО: НЕ ставим touch-action: manipulation — это ломает touch-драг
+   в dnd-kit (браузер перехватывает жест как скролл). touch-action
+   задаём точечно на ручках перетаскивания. */
+button {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}

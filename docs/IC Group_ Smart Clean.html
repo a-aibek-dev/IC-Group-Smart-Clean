@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IC Group: Smart Cleaning</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        brand: { 50: '#f0fdf4', 100: '#dcfce7', 500: '#22c55e', 600: '#16a34a', 900: '#14532d' },
+                        zone: {
+                            blue: '#3b82f6',   // Общие зоны
+                            yellow: '#eab308', // Грязные зоны
+                            red: '#ef4444',    // Санузлы
+                            green: '#22c55e'   // Кафетерии
+                        }
+                    },
+                    animation: {
+                        'slide-up': 'slideUp 0.4s ease-out',
+                        'fade-in': 'fadeIn 0.3s ease-out',
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                    },
+                    keyframes: {
+                        slideUp: { '0%': { transform: 'translateY(20px)', opacity: '0' }, '100%': { transform: 'translateY(0)', opacity: '1' } },
+                        fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; -webkit-tap-highlight-color: transparent; }
+        /* Стилизация скроллбара для красоты */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .glass { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); }
+        .mobile-container { max-width: 420px; margin: 0 auto; min-height: 100vh; background: #fff; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); position: relative; overflow: hidden;}
+    </style>
+</head>
+<body class="text-slate-800 antialiased h-screen overflow-hidden flex items-center justify-center">
+
+    <div id="app" class="w-full h-full"></div>
+
+    <script>
+        // БАЗА ДАННЫХ (Mock Data)
+        const state = {
+            view: 'login', // login, cleaner_route, cleaner_zone, manager_dashboard
+            user: null,
+            activeZoneId: null,
+            photoVerificationStatus: 'idle', // idle, scanning, success
+            toast: null,
+            zones: [
+                { 
+                    id: 1, 
+                    name: 'Офис и Коридоры', 
+                    type: 'blue', 
+                    colorClass: 'bg-blue-500', 
+                    lightColor: 'bg-blue-50',
+                    text: 'text-blue-600',
+                    ph: '7.0 (Нейтральное средство)', 
+                    icon: 'briefcase',
+                    status: 'completed', // completed, active, locked
+                    tasks: [
+                        { id: 11, title: 'Пропылесосить ковролин', done: true, hidden: false },
+                        { id: 12, title: 'Протереть рабочие столы', done: true, hidden: false },
+                        { id: 13, title: 'Дверные ручки и выключатели', done: true, hidden: true, crucial: true } // hidden означает "слепая зона"
+                    ]
+                },
+                { 
+                    id: 2, 
+                    name: 'Санузел (Женский)', 
+                    type: 'red', 
+                    colorClass: 'bg-red-500', 
+                    lightColor: 'bg-red-50',
+                    text: 'text-red-600',
+                    ph: '3.0 (Кислотное средство)', 
+                    icon: 'droplets',
+                    status: 'active', 
+                    tasks: [
+                        { id: 21, title: 'Очистка унитазов и раковин', done: false, hidden: false },
+                        { id: 22, title: 'Замена туалетной бумаги', done: false, hidden: false },
+                        { id: 23, title: 'Кнопки смыва и диспенсеры', done: false, hidden: true, crucial: true },
+                        { id: 24, title: 'Вентиляционные решетки', done: false, hidden: true, crucial: true }
+                    ]
+                },
+                { 
+                    id: 3, 
+                    name: 'Кафетерий', 
+                    type: 'green', 
+                    colorClass: 'bg-green-500', 
+                    lightColor: 'bg-green-50',
+                    text: 'text-green-600',
+                    ph: '8.0 (Щелочное средство)', 
+                    icon: 'coffee',
+                    status: 'locked', 
+                    tasks: [
+                        { id: 31, title: 'Протереть обеденные столы', done: false, hidden: false },
+                        { id: 32, title: 'Мытье полов', done: false, hidden: false },
+                        { id: 33, title: 'Ручка холодильника и СВЧ', done: false, hidden: true, crucial: true }
+                    ]
+                }
+            ]
+        };
+
+        function render() {
+            const app = document.getElementById('app');
+            let content = '';
+
+            // 1. ЭКРАН ЛОГИНА (Для питча - выбор роли)
+            if (state.view === 'login') {
+                content = `
+                    <div class="h-full flex flex-col items-center justify-center p-6 bg-slate-900 animate-fade-in text-center relative overflow-hidden">
+                        <div class="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-brand-500 via-slate-900 to-slate-900"></div>
+                        <div class="z-10 w-full max-w-md">
+                            <i data-lucide="sparkles" class="w-16 h-16 text-brand-500 mx-auto mb-6"></i>
+                            <h1 class="text-4xl font-bold text-white mb-2 tracking-tight">IC Group</h1>
+                            <p class="text-slate-400 mb-12 text-lg">Smart Clean OS</p>
+                            
+                            
+                                <button onclick="login('cleaner')" class="w-full bg-brand-500 hover:bg-brand-600 text-white font-semibold py-4 px-6 rounded-2xl transition-all flex items-center justify-between shadow-lg shadow-brand-500/30">
+                                    <span class="flex items-center text-lg"><i data-lucide="smartphone" class="w-6 h-6 mr-3"></i> Я - Клинер (Приложение)</span>
+                                    <i data-lucide="chevron-right" class="w-5 h-5"></i>
+                                </button>
+                                <p class="text-sm text-slate-400 mt-2">Профиль: Айгуль, рейтинг 4.9, 2 месяца стажа</p>
+                                </button>
+                                <p class="text-sm text-slate-400">Профиль: Айгуль, рейтинг 4.9, 2 месяца стажа</p>
+                                <button onclick="login('cleaner')" class="w-full bg-brand-500 hover:bg-brand-600 text-white font-semibold py-4 px-6 rounded-2xl transition-all flex items-center justify-between shadow-lg shadow-brand-500/30">
+                                    <span class="flex items-center text-lg"><i data-lucide="smartphone" class="w-6 h-6 mr-3"></i> Я - Клинер (Приложение)</span>
+                                    <i data-lucide="chevron-right" class="w-5 h-5"></i>
+                                </button>
+                                <button onclick="login('manager')" class="w-full bg-slate-800 hover:bg-slate-700 text-white font-semibold py-4 px-6 rounded-2xl border border-slate-700 transition-all flex items-center justify-between">
+                                    <span class="flex items-center text-lg"><i data-lucide="layout-dashboard" class="w-6 h-6 mr-3"></i> Я - Менеджер (Дашборд)</span>
+                                    <i data-lucide="chevron-right" class="w-5 h-5"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // 2. ИНТЕРФЕЙС КЛИНЕРА (Мобильный вид)
+            else if (state.view === 'cleaner_route' || state.view === 'cleaner_zone') {
+                content = `<div class="mobile-container flex flex-col animate-fade-in bg-slate-50">`;
+                
+                // Шапка клинера
+                content += `
+                    <div class="bg-white px-6 pt-12 pb-4 shadow-sm z-10 sticky top-0 flex justify-between items-center">
+                        <div>
+                            <p class="text-sm text-slate-500 font-medium">Смена активна</p>
+                            <h2 class="text-xl font-bold text-slate-800">Айгуль М.</h2>
+                        </div>
+                        <button onclick="logout()" class="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:bg-slate-200">
+                            <i data-lucide="log-out" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                    <div class="flex-1 overflow-y-auto pb-24">
+                `;
+
+                if (state.view === 'cleaner_route') {
+                    // МАРШРУТНАЯ КАРТА (Анти-хаос)
+                    content += `
+                        <div class="p-6">
+                            <h3 class="text-2xl font-bold text-slate-800 mb-2">Ваш маршрут</h3>
+                            <p class="text-slate-500 mb-8 text-sm">Следуйте строго по плану во избежание перекрестного загрязнения.</p>
+                            
+                            <div class="relative border-l-2 border-slate-200 ml-4 space-y-8 pb-8">
+                    `;
+                    
+                    \state.zones.forEach((zone, index) => {
+                        const isCompleted = zone.status === 'completed';
+                        const isActive = zone.status === 'active';
+                        const isLocked = zone.status === 'locked';
+                        
+                        // Step number and label
+                        const stepLabels = ['Офис и Коридоры', 'Санузел (Женский)', 'Кафетерий'];
+                        const stepNum = index + 1;
+                        const zoneTypeLabels = {
+                            blue: 'Общая зона',
+                            red: 'Санузел', 
+                            green: 'Кафетерий'
+                        };
+                        const zoneType = zoneTypeLabels[zone.type] || 'Зона';
+                        
+                        let dotColor = isCompleted ? 'bg-brand-500 border-white' : isActive ? \`\${zone.colorClass} border-white shadow-lg shadow-\${zone.colorClass.split('-')[1]}-500/40 animate-pulse-slow\` : 'bg-slate-200 border-white';
+                        let cardStyle = isActive ? 'bg-white shadow-md border border-slate-100 ring-2 ring-offset-2 ring-\${zone.colorClass.split('-')[1]}-500' : isLocked ? 'bg-slate-50 opacity-60' : 'bg-white shadow-sm border border-slate-100';
+                        const isCompleted = zone.status === 'completed';
+                        const isActive = zone.status === 'active';
+                        const isLocked = zone.status === 'locked';
+                        
+                        // Determine zone type description
+                        let zoneType = '';
+                        if (zone.type === 'blue') zoneType = 'Общая зона';
+                        if (zone.type === 'red') zoneType = 'Санузел';
+                        if (zone.type === 'green') zoneType = 'Кафетерий';
+                        if (zone.type === 'yellow') zoneType = 'Грязная зона';
+                        
+                        let dotColor = isCompleted ? 'bg-brand-500 border-white' : isActive ? \`\${zone.colorClass} border-white shadow-lg shadow-\${zone.colorClass.split('-')[1]}-500/40 animate-pulse-slow\` : 'bg-slate-200 border-white';
+                        let cardStyle = isActive ? 'bg-white shadow-md border border-slate-100 ring-2 ring-offset-2 ring-\${zone.colorClass.split('-')[1]}-500' : isLocked ? 'bg-slate-50 opacity-60' : 'bg-white shadow-sm border border-slate-100';
+                        const isCompleted = zone.status === 'completed';
+                        const isActive = zone.status === 'active';
+                        const isLocked = zone.status === 'locked';
+                        
+                        let dotColor = isCompleted ? 'bg-brand-500 border-white' : isActive ? `${zone.colorClass} border-white shadow-lg shadow-${zone.colorClass.split('-')[1]}-500/40 animate-pulse-slow` : 'bg-slate-200 border-white';
+                        let cardStyle = isActive ? 'bg-white shadow-md border border-slate-100 ring-2 ring-offset-2 ring-' + zone.colorClass.split('-')[1] + '-500' : isLocked ? 'bg-slate-50 opacity-60' : 'bg-white shadow-sm border border-slate-100';
+
+                        content += `
+                            <div class="relative pl-8">
+                                <div class="absolute -left-[11px] top-1 w-5 h-5 rounded-full border-4 ${dotColor} z-10"></div>
+                                <div class="rounded-2xl p-4 transition-all ${cardStyle} ${isActive ? 'cursor-pointer transform hover:-translate-y-1' : ''}" 
+                                     onclick="${isActive ? `openZone(${zone.id})` : isLocked ? `showToast('Сначала завершите предыдущую зону')` : ''}">
+                                    
+                                    <div class="flex justify-between items-start mb-3">
+                                        <div class="flex items-center">
+                                            <div class="w-10 h-10 rounded-xl ${zone.lightColor} ${zone.text} flex items-center justify-center mr-3">
+                                                <i data-lucide="${zone.icon}" class="w-5 h-5"></i>
+                                            </div>
+                                            <div>
+                                                <span class="text-xs font-bold uppercase tracking-wider ${zone.text} mb-1 block">Шаг ${index + 1}</span>
+                                                <h4 class="font-bold text-slate-800 text-lg leading-tight">${zone.name}</h4>
+                                            </div>
+                                        </div>
+                                        ${isCompleted ? `<i data-lucide="check-circle-2" class="w-6 h-6 text-brand-500"></i>` : ''}
+                                    </div>
+                                    
+                                    ${isActive ? `
+                                        <button class="w-full mt-2 py-3 rounded-xl ${zone.colorClass} text-white font-semibold flex justify-center items-center">
+                                            Приступить <i data-lucide="arrow-right" class="w-4 h-4 ml-2"></i>
+                                        </button>
+                                    ` : isLocked ? `
+                                        <p class="text-xs text-slate-400 font-medium flex items-center mt-2"><i data-lucide="lock" class="w-3 h-3 mr-1"></i> Зона заблокирована</p>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        `;
+                    });
+
+                    content += `</div></div>`;
+
+                } else if (state.view === 'cleaner_zone') {
+                    // АКТИВНАЯ ЗОНА И ЧЕК-ЛИСТ (Цветовое кодирование и детали)
+                    const zone = state.zones.find(z => z.id === state.activeZoneId);
+                    const allTasksDone = zone.tasks.every(t => t.done);
+                    
+                    content += `
+                        <div class="animate-slide-up">
+                            <!-- Цветная шапка зоны -->
+                            <div class="${zone.colorClass} p-6 text-white pb-12 relative overflow-hidden">
+                                <div class="absolute -right-4 -bottom-4 opacity-20">
+                                    <i data-lucide="${zone.icon}" class="w-32 h-32"></i>
+                                </div>
+                                <button onclick="state.view = 'cleaner_route'; render();" class="mb-6 flex items-center text-white/80 hover:text-white text-sm font-medium transition-colors">
+                                    <i data-lucide="arrow-left" class="w-4 h-4 mr-1"></i> К маршруту
+                                </button>
+                                <h2 class="text-3xl font-bold mb-2">${zone.name}</h2>
+                                
+                                <div class="bg-white/20 backdrop-blur-md rounded-lg p-3 inline-flex items-center border border-white/30 mt-2 shadow-sm">
+                                    <i data-lucide="flask-conical" class="w-5 h-5 mr-2"></i>
+                                    <div>
+                                        <p class="text-xs text-white/80 uppercase tracking-wide">pH Scale Химия</p>
+                                        <p class="font-semibold text-sm">${zone.ph}</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Чек-лист -->
+                            <div class="px-6 -mt-6 relative z-10">
+                                <div class="bg-white rounded-2xl shadow-xl p-1 border border-slate-100">
+                                    
+                                    <div class="p-4 bg-slate-50 border-b border-slate-100 rounded-t-xl">
+                                        <h3 class="font-bold text-slate-800 text-sm uppercase tracking-wider">Базовые стандарты</h3>
+                                    </div>
+                                    <div class="p-2 space-y-1">
+                                        ${zone.tasks.filter(t => !t.hidden).map(task => `
+                                            <div class="flex items-center p-3 rounded-xl hover:bg-slate-50 cursor-pointer transition-colors" onclick="toggleTask(${zone.id}, ${task.id})">
+                                                <div class="w-6 h-6 rounded border-2 flex items-center justify-center mr-3 transition-colors ${task.done ? zone.colorClass + ' border-' + zone.colorClass.split('-')[1] + '-500 text-white' : 'border-slate-300' }">
+                                                    ${task.done ? '<i data-lucide="check" class="w-4 h-4"></i>' : ''}
+                                                </div>
+                                                <span class="text-base font-medium ${task.done ? 'text-slate-400 line-through' : 'text-slate-700'}">${task.title}</span>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+
+                                    <div class="p-4 bg-orange-50 border-y border-orange-100 mt-2">
+                                        <h3 class="font-bold text-orange-800 text-sm flex items-center">
+                                            <i data-lucide="eye" class="w-4 h-4 mr-2"></i> Скрытые детали (Эффект ореола)
+                                        </h3>
+                                    </div>
+                                    <div class="p-2 space-y-1">
+                                                                                                        <div class="text-xs text-slate-500 font-medium mb-3">Скрытых задач: ${zone.tasks.filter(t => t.hidden).length} из ${zone.tasks.length}</div>
+                                                                ${zone.tasks.filter(t => t.hidden).map(task => `
+                                            <div class="flex items-center p-3 rounded-xl hover:bg-orange-50/50 cursor-pointer transition-colors" onclick="toggleTask(${zone.id}, ${task.id})">
+                                                <div class="w-6 h-6 rounded border-2 flex items-center justify-center mr-3 transition-colors ${task.done ? 'bg-orange-500 border-orange-500 text-white' : 'border-slate-300' }">
+                                                    ${task.done ? '<i data-lucide="check" class="w-4 h-4"></i>' : ''}
+                                                </div>
+                                                <span class="text-base font-bold ${task.done ? 'text-slate-400 line-through' : 'text-slate-800'}">${task.title}</span>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                                
+                                <!-- ФОТО-АНТИФРОД -->
+                                <div class="mt-8 mb-8">
+                                    ${state.photoVerificationStatus === 'idle' ? `
+                                        <button onclick="simulatePhotoUpload()" class="w-full ${allTasksDone ? 'bg-slate-900 hover:bg-slate-800 shadow-xl shadow-slate-900/20' : 'bg-slate-300 cursor-not-allowed'} text-white font-bold text-lg py-5 rounded-2xl transition-all flex items-center justify-center" ${!allTasksDone ? 'disabled' : ''}>
+                                            <i data-lucide="camera" class="w-6 h-6 mr-3"></i> Фото-подтверждение зоны
+                                        </button>
+                                        ${!allTasksDone ? `<p class="text-center text-sm text-slate-500 mt-3 font-medium">Отметьте все пункты чек-листа</p>` : ''}
+                                    ` : state.photoVerificationStatus === 'scanning' ? `
+                                        <div class="w-full bg-slate-100 border border-slate-200 rounded-2xl p-6 text-center animate-pulse">
+                                            <i data-lucide="scan-line" class="w-8 h-8 text-brand-500 mx-auto mb-3 animate-bounce"></i>
+                                            <p class="font-bold text-slate-800">Анализ метаданных...</p>
+                                            <p class="text-xs text-slate-500 mt-1">Проверка EXIF и GPS координат</p>
+                                        </div>
+                                    ` : `
+                                        <button onclick="finishZone(${zone.id})" class="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold text-lg py-5 rounded-2xl shadow-xl shadow-brand-500/30 transition-all flex items-center justify-center animate-slide-up">
+                                            <i data-lucide="check-circle" class="w-6 h-6 mr-3"></i> Зона проверена. Завершить
+                                        </button>
+                                    `}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                content += `</div></div>`;
+            }
+
+            // 3. ДАШБОРД МЕНЕДЖЕРА (Десктопный вид)
+            else if (state.view === 'manager_dashboard') {
+                content = `
+                    <div class="h-full w-full bg-slate-50 flex flex-col animate-fade-in">
+                        <!-- Навбар -->
+                        <div class="bg-white border-b border-slate-200 px-8 py-4 flex justify-between items-center z-10">
+                            <div class="flex items-center">
+                                <div class="w-10 h-10 bg-brand-500 rounded-lg flex items-center justify-center text-white mr-3">
+                                    <i data-lucide="bar-chart-3" class="w-6 h-6"></i>
+                                </div>
+                                <div>
+                                    <h1 class="text-xl font-bold text-slate-800 leading-tight">IC Group Control</h1>
+                                    <p class="text-xs text-slate-500 font-medium">Мониторинг качества (БЦ Нурлы Тау)</p>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-4">
+                                <span class="bg-brand-100 text-brand-900 px-3 py-1 rounded-full text-sm font-bold flex items-center">
+                                    <span class="w-2 h-2 rounded-full bg-brand-500 mr-2 animate-pulse"></span> Live
+                                </span>
+                                <button onclick="logout()" class="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors">
+                                    <i data-lucide="log-out" class="w-5 h-5"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Контент Дашборда -->
+                        <div class="flex-1 overflow-auto p-8">
+                            <div class="max-w-6xl mx-auto space-y-6">
+                                
+                                <!-- Статистика -->
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                                        <div class="flex justify-between items-start mb-4">
+                                            <div>
+                                                <p class="text-slate-500 font-medium text-sm mb-1">Индекс чистоты (Скрытые зоны)</p>
+                                                <h3 class="text-3xl font-bold text-slate-800">92%</h3>
+                                            </div>
+                                            <div class="w-12 h-12 rounded-xl bg-orange-50 text-orange-500 flex items-center justify-center"><i data-lucide="eye" class="w-6 h-6"></i></div>
+                                        </div>
+                                        <p class="text-xs text-brand-600 font-medium flex items-center"><i data-lucide="trending-up" class="w-3 h-3 mr-1"></i> +5% после внедрения чеклиста</p>
+                                    </div>
+                                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                                        <div class="flex justify-between items-start mb-4">
+                                            <div>
+                                                <p class="text-slate-500 font-medium text-sm mb-1">Сотрудников на смене</p>
+                                                <h3 class="text-3xl font-bold text-slate-800">12</h3>
+                                            </div>
+                                            <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center"><i data-lucide="users" class="w-6 h-6"></i></div>
+                                        </div>
+                                        <p class="text-xs text-slate-500 font-medium">0 опозданий (Антифрод GPS активен)</p>
+                                    </div>
+                                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                                        <div class="flex justify-between items-start mb-4">
+                                            <div>
+                                                <p class="text-slate-500 font-medium text-sm mb-1">Нарушения регламента (pH)</p>
+                                                <h3 class="text-3xl font-bold text-brand-500">0</h3>
+                                            </div>
+                                            <div class="w-12 h-12 rounded-xl bg-brand-50 text-brand-500 flex items-center justify-center"><i data-lucide="shield-check" class="w-6 h-6"></i></div>
+                                        </div>
+                                        <p class="text-xs text-slate-500 font-medium">Перекрестного загрязнения не выявлено</p>
+                                    </div>
+                                </div>
+
+
+                                <!-- Панель управления маршрутом для менеджера -->
+                                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 mb-6">
+                                    <h4 class="font-bold text-slate-800 mb-3">Маршрутная карта</h4>
+                                    <p class="text-slate-500 text-sm mb-4">Перетаскивайте зоны чтобы изменить порядок уборки. Система автоматически подставит подходящие регламенты и чек-листы.</p>
+                                    <div class="space-y-3">
+                                        <div class="flex items-center gap-2">
+                                            <div class="w-8 h-8 rounded-bg bg-blue-500 text-white text-xs font-bold font-bold">1</div>
+                                            <span>Офис и Коридоры</span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <div class="w-8 h-8 rounded-bg bg-red-500 text-white text-xs font-bold">2</div>
+                                            <span>Санузел (Женский)</span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <div class="w-8 h-8 rounded-bg bg-green-500 text-white text-xs font-bold">3</div>
+                                            <span>Кафетерий</span>
+                                        </div>
+                                    </div>
+                                    <button onclick="reorderZones('forward')" class="w-full bg-brand-100 text-brand-800 py-3 rounded-xl text-sm font-medium flex items-center justify-between transition-colors hover:bg-brand-200">
+                                        <span>Переместить к следующему шагу</span>
+                                        <i data-lucide="arrow-up-line" class="w-4 h-4"></i>
+                                    </button>
+                                    <button onclick="reorderZones('backward')" class="w-full bg-brand-100 text-brand-800 py-3 rounded-xl text-sm font-medium flex items-center justify-between transition-colors hover:bg-brand-200">
+                                        <span>Вернуться к предыдущему шагу</span>
+                                        <i data-lucide="arrow-down-line" class="w-4 h-4"></i>
+                                    </button>
+                                    <p class="text-xs text-slate-500">Порядок: Шаг 1 → Шаг 2 → Шаг 3</p>
+                                </div>
+                                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 mb-6">
+                                    <h4 class="font-bold text-slate-800 mb-4">Маршрутная карта</h4>
+                                    <div class="space-y-3">
+                                        <div class="flex items-center gap-2">
+                                        <button onclick="reorderZones('backward')" class="flex-1 bg-slate-100 text-slate-600 hover:bg-slate-200 py-2 rounded-l-xl text-sm font-medium flex items-center justify-center transition-colors">
+                                            <i data-lucide="arrow-down-line" class="w-3 h-3"></i>
+                                            Назад
+                                        </button>
+                                        <button onclick="reorderZones('forward')" class="flex-1 bg-slate-100 text-slate-600 hover:bg-slate-200 py-2 rounded-r-xl text-sm font-medium flex items-center justify-center transition-colors">
+                                            <span>Вперед</span>
+                                            <i data-lucide="arrow-up-line" class="w-3 h-3"></i>
+                                        </button>
+                                    </div>
+                                        <p class="text-xs text-slate-500">Попробуйте перетащить зоны для смены порядка уборки</p>
+                                    </div>
+                                </div>
+                                <!-- Тепловая карта и Мониторинг -->
+                                <h3 class="text-xl font-bold text-slate-800 pt-4">Мониторинг маршрутов (Айгуль М.)</h3>
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                `;
+
+                // Рендер зон на дашборде
+                state.zones.forEach(zone => {
+                    const isCompleted = zone.status === 'completed';
+                    const isActive = zone.status === 'active';
+                    let statusBadge = isCompleted 
+                        ? `<span class="bg-brand-100 text-brand-700 px-2 py-1 rounded text-xs font-bold border border-brand-200">Проверено</span>`
+                        : isActive 
+                            ? `<span class="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs font-bold border border-blue-200 animate-pulse">В процессе</span>`
+                            : `<span class="bg-slate-100 text-slate-500 px-2 py-1 rounded text-xs font-bold border border-slate-200">Ожидает</span>`;
+
+                    content += `
+                        <div class="bg-white rounded-2xl shadow-sm border ${isActive ? 'border-' + zone.colorClass.split('-')[1] + '-300 ring-4 ring-' + zone.colorClass.split('-')[1] + '-50' : 'border-slate-100'} overflow-hidden flex flex-col">
+                            <div class="${zone.lightColor} px-5 py-4 border-b border-white/20 flex justify-between items-center">
+                                <div class="flex items-center gap-2">
+                                    <div class="w-3 h-3 rounded-full ${zone.colorClass}"></div>
+                                    <span class="text-xs font-medium ${zone.type === 'red' ? 'text-red-400' : zone.type === 'green' ? 'text-green-400' : zone.type === 'blue' ? 'text-blue-400' : 'text-yellow-400'} font-medium">${zone.type === 'red' ? 'Саню' : zone.type === 'green' ? 'Кафе' : zone.type === 'blue' ? 'Офис' : 'Зона'}</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <div class="w-3 h-3 rounded-full ${zone.colorClass}"></div>
+                                    <h4 class="font-bold text-slate-800">${zone.name}</h4>
+                                </div>
+                                ${statusBadge}
+                            </div>
+                            <div class="p-5 flex-1">
+                                <p class="text-xs text-slate-500 font-medium mb-3 uppercase tracking-wider">Чек-лист (Скрытые зоны)</p>
+                                <ul class="space-y-3">
+                                    ${zone.tasks.filter(t => t.hidden).map(t => `
+                                        <li class="flex justify-between items-center text-sm">
+                                            <span class="${t.done ? 'text-slate-400 line-through' : 'text-slate-700 font-medium'}">${t.title}</span>
+                                            ${t.done ? `<i data-lucide="check-circle-2" class="w-5 h-5 text-brand-500"></i>` : `<i data-lucide="circle" class="w-5 h-5 text-slate-300"></i>`}
+                                        </li>
+                                    `).join('')}
+                                </ul>
+                            </div>
+                            ${isCompleted ? `
+                                <div class="bg-slate-50 p-4 border-t border-slate-100 flex items-center justify-between">
+                                    <div class="flex items-center text-xs text-slate-500">
+                                        <i data-lucide="map-pin" class="w-3 h-3 mr-1"></i> GPS: Совпадает
+                                    </div>
+                                    <button class="text-brand-600 text-xs font-bold flex items-center hover:underline">
+                                        <i data-lucide="image" class="w-4 h-4 mr-1"></i> Фото-отчет
+                                    </button>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                });
+
+                content += `</div></div></div></div>`;
+            }
+
+            // Тосты (Уведомления)
+            if (state.toast) {
+                content += `
+                    <div class="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center animate-slide-up">
+                        <i data-lucide="info" class="w-5 h-5 mr-3 text-brand-400"></i>
+                        <span class="font-medium">${state.toast}</span>
+                    </div>
+                `;
+            }
+
+            app.innerHTML = content;
+            lucide.createIcons();
+        }
+
+        
+        function showToast(message, duration = 3000) {
+            state.toast = message;
+            render();
+            setTimeout(() => { state.toast = null; render(); }, duration);
+        }
+
+        function login(role) {
+            state.user = role;
+            state.view = role === 'cleaner' ? 'cleaner_route' : 'manager_dashboard';
+            render();
+        }
+
+        function logout() {
+            state.user = null;
+            state.view = 'login';
+            state.activeZoneId = null;
+            state.photoVerificationStatus = 'idle';
+            render();
+        }
+
+        function openZone(zoneId) {
+            state.activeZoneId = zoneId;
+            state.view = 'cleaner_zone';
+            state.photoVerificationStatus = 'idle';
+            render();
+        }
+
+        function toggleTask(zoneId, taskId) {
+            const zone = state.zones.find(z => z.id === zoneId);
+            const task = zone.tasks.find(t => t.id === taskId);
+            task.done = !task.done;
+            render();
+        }
+
+        function simulatePhotoUpload() {
+            // Эмуляция проверки "Антифрод" (GPS + EXIF)
+            state.photoVerificationStatus = 'scanning';
+            render();
+            
+            setTimeout(() => {
+                state.photoVerificationStatus = 'success';
+                showToast('Метаданные подтверждены! Фото подлинное.');
+                render();
+            }, 2000);
+        }
+
+        function finishZone(zoneId) {
+            const currentIndex = state.zones.findIndex(z => z.id === zoneId);
+            
+            // Отмечаем текущую как выполненную
+            state.zones[currentIndex].status = 'completed';
+            
+            // Подсчитываем общий прогресс
+            const totalTasks = state.zones.reduce((sum, zone) => sum + zone.tasks.length, 0);
+            const completedTasks = state.zones.reduce((sum, zone) => sum + zone.tasks.filter(t => t.done).length, 0);
+            
+            // Разблокируем следующую (если есть)
+            if (currentIndex + 1 < state.zones.length) {
+                state.zones[currentIndex + 1].status = 'active';
+                showToast('Маршрут обновлен. Переходите к следующей зоне.');
+            } else {
+                // Все зоны завершены
+                showToast('Смена успешно завершена! Отличная работа.', 5000);
+                // Можно добавить показатель общего результата
+                const completionRate = Math.round((completedTasks / totalTasks) * 100);
+                showToast(`Смена завершена на ${completionRate}%. Спасибо за работу!`, 8000);
+            }
+            
+            state.view = 'cleaner_route';
+            render();
+        }
+
+        // Инициализация при загрузке
+        
+        function reorderZones(direction) {
+            const activeZoneIndex = state.zones.findIndex(z => z.status === 'active');
+            if (direction === 'forward' && activeZoneIndex >= 0 && activeZoneIndex < state.zones.length - 1) {
+                // Swap active zone with next one
+                [state.zones[activeZoneIndex], state.zones[activeZoneIndex + 1]] = [state.zones[activeZoneIndex + 1], state.zones[activeZoneIndex]];
+                // Update statuses
+                state.zones[activeZoneIndex].status = 'active';
+                state.zones[activeZoneIndex + 1].status = 'locked';
+                showToast('Маршрут обновлен. Порядок зен изменился.');
+                render();
+            } else if (direction === 'backward' && activeZoneIndex > 0) {
+                // Swap active zone with previous one
+                [state.zones[activeZoneIndex], state.zones[activeZoneIndex - 1]] = [state.zones[activeZoneIndex - 1], state.zones[activeZoneIndex]];
+                // Update statuses
+                state.zones[activeZoneIndex].status = 'locked';
+                state.zones[activeZoneIndex - 1].status = 'active';
+                showToast('Маршрут обновлен. Порядок зен изменился.');
+                render();
+            }
+        }
+
+        window.onload = () => {
+            render();
+        };
+    </script>
+</body>
+</html>

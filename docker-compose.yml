@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    ports:
+      - "5173:5173"
+    volumes:
+      # Весь проект примонтирован в контейнер — любые правки кода,
+      # конфигов, public/ и т.д. подхватываются мгновенно (vite HMR),
+      # docker пересобирать НЕ нужно.
+      - .:/app
+      # node_modules живёт в отдельном volume контейнера,
+      # чтобы host-маунт его не затирал (устанавливается при build)
+      - /app/node_modules
+    environment:
+      - CHOKIDAR_USEPOLLING=true
